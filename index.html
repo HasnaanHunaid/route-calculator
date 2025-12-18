@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Optimal Route Calculator with OpenStreetMap, Leaflet, and ORS</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+        #map {
+            height: 400px;
+            width: 100%;
+            margin-top: 20px;
+        }
+        form {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+        }
+        input {
+            width: 100%;
+            padding: 8px;
+            margin-bottom: 10px;
+        }
+        button {
+            padding: 10px 20px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        #results {
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Optimal Route Calculator</h1>
+    <p>This app uses OpenStreetMap, Leaflet, and OpenRouteService (ORS) to calculate driving routes. It computes fuel cost based on 2.7 AED per litre and 6.2 km/l fuel consumption. ORS does not provide exact toll prices, so tolls are handled by requesting routes that avoid tolls (if possible) and routes that do not. Fuel cost is calculated for each. The "optimal" route is selected as the one with the lowest fuel cost. You can manually input toll costs if known.</p>
+    <form id="routeForm">
+        <label for="start">Starting Location (lat,lng or address):</label>
+        <input type="text" id="start" placeholder="e.g., 25.276987,55.296249 or Dubai" required>
+        
+        <label for="end">End Destination (lat,lng or address):</label>
+        <input type="text" id="end" placeholder="e.g., 25.204849,55.270783 or Abu Dhabi" required>
+        
+        <label for="tollCost">Manual Toll Cost (AED, optional):</label>
+        <input type="number" id="tollCost" placeholder="Enter toll cost if known" step="0.01">
+        
+        <button type="submit">Calculate Optimal Route</button>
+    </form>
+    
+    <div id="results"></div>
+    <div id="map"></div>
+
+    <script>
+        let map;
+        let routeLayer;
+
+        function initMap() {
+            map = L.map('map').setView([25.276987, 55.296249], 10); // Default to Dubai area
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            }).addTo(map);
+            routeLayer = L.layerGroup().addTo(map);
+        }
+
+        document.getElementById('routeForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const start = document.getElementById('start').value;
+            const end = document.getElementById('end').value;
+            const manualToll = parseFloat(document.getElementById('tollCost').value) || 0;
+            calculateRoutes(start, end, manualToll);
+        });
+
+        async function calculateRoutes(start, end, manualToll) {
+            const apiKey = 'eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6ImMzNjM4ZDNkZDg2MzQxNThhNzEwYjZiYzUyODYwMDhmIiwiaCI6Im11cm11cjY0In0='; // Replace with your OpenRouteService API key (free tier available)
+            const profile = 'driving-car';
+
+            // Function to get route from ORS
+            async function getRoute(start, end, avoidTolls = false) {
+                const avoid = avoidTolls ? ['toll'] : [];
+                const url = `https://api.openrouteservice.org/v2/directions/${profile}?api_key=${apiKey}&start=${start}&end=${end}&format=geojson&instructions=false&options=${JSON.stringify({ avoid })}`;
+                const response = await fetch(url);
+                if (!response.ok) throw new Error('ORS API error');
+                return await response.json();
+            }
+
+            try {
+                // Geocode start and end if not lat,lng
+                const geocode = async (query) => {
+                    if (/^-?\d+\.\d+,-?\d+\.\d+$/.test(query)) {
+                        return query.split(',').map(Number);
+                    }
+                    const geoUrl = `https://api.openrouteservice.org/geocode/search?api_key=${apiKey}&text=${encodeURIComponent(query)}&size=1`;
+                    const geoRes = await fetch(geoUrl);
+                    const geoData = await geoRes.json();
+                    if (geoData.features.length === 0) throw new Error('Geocoding failed');
+                    return geoData.features[0].geometry.coordinates;
+                };
+
+                const startCoords = await geocode(start);
+                const endCoords = await geocode(end);
+
+                // Get two routes: one avoiding tolls, one not
+                const routeNoTolls = await getRoute(startCoords.join(','), endCoords.join(','), true);
+                const routeWithTolls = await getRoute(startCoords.join(','), endCoords.join(','), false);
+
+                const routes = [
+                    { name: 'Avoiding Tolls', data: routeNoTolls, hasTolls: false },
+                    { name: 'Allowing Tolls', data: routeWithTolls, hasTolls: true }
+                ];
+
+                let minCost = Infinity;
+                let bestRoute = null;
+                let resultsDiv = document.getElementById('results');
+                resultsDiv.innerHTML = '<h2>Route Options:</h2>';
+
+                routes.forEach((route, index) => {
+                    if (!route.data.features || route.data.features.length === 0) return;
+                    const feature = route.data.features[0];
+                    const distanceKm = feature.properties.segments[0].distance / 1000; // Convert meters to km
+                    const durationMin = feature.properties.segments[0].duration / 60; // Convert seconds to minutes
+                    const fuelCost = (distanceKm / 6.2) * 2.7; // Fuel cost
+                    const tollCost = route.hasTolls ? manualToll : 0; // Use manual toll if applicable
+                    const totalCost = fuelCost + tollCost;
+
+                    resultsDiv.innerHTML += `
+                        <p><strong>${route.name}:</strong><br>
+                        Distance: ${distanceKm.toFixed(2)} km<br>
+                        Time: ${Math.floor(durationMin / 60)}h ${Math.floor(durationMin % 60)}m<br>
+                        Fuel Cost: ${fuelCost.toFixed(2)} AED<br>
+                        Toll Cost: ${tollCost.toFixed(2)} AED<br>
+                        Total Cost: ${totalCost.toFixed(2)} AED</p>
+                    `;
+
+                    if (totalCost < minCost) {
+                        minCost = totalCost;
+                        bestRoute = route;
+                    }
+                });
+
+                // Display the optimal route
+                resultsDiv.innerHTML += `<p><strong>Optimal Route Selected:</strong> ${bestRoute.name} with the lowest total cost (${minCost.toFixed(2)} AED, including fuel and manual toll input).</p>`;
+
+                // Display the best route on the map
+                routeLayer.clearLayers();
+                const geoJson = bestRoute.data;
+                L.geoJSON(geoJson, {
+                    style: { color: 'blue', weight: 5 }
+                }).addTo(routeLayer);
+                map.fitBounds(L.geoJSON(geoJson).getBounds());
+
+            } catch (error) {
+                alert('Error calculating routes: ' + error.message);
+            }
+        }
+
+        // Initialize the map when the page loads
+        window.onload = initMap;
+    </script>
+</body>
+</html>
