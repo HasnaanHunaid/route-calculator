@@ -45,7 +45,7 @@
 </head>
 <body>
     <h1>Optimal Route Calculator</h1>
-    <p>This app uses OpenStreetMap, Leaflet, and OpenRouteService (ORS) to calculate driving routes. It computes fuel cost based on 2.7 AED per litre and 6.2 km/l fuel consumption. ORS does not provide exact toll prices, so tolls are handled by requesting routes that avoid tolls (if possible) and routes that do not. Fuel cost is calculated for each. The "optimal" route is selected as the one with the lowest fuel cost. You can manually input toll costs if known.</p>
+    <p>This app uses OpenStreetMap, Leaflet, and OpenRouteService (ORS) to calculate driving routes. It computes fuel cost based on 4.28 AED per litre and 6.5 km/l fuel consumption. ORS does not provide exact toll prices, so tolls are handled by requesting routes that avoid tolls (if possible) and routes that do not. Fuel cost is calculated for each. The "optimal" route is selected as the one with the lowest fuel cost. You can manually input toll costs if known.</p>
     <form id="routeForm">
         <label for="start">Starting Location (lat,lng or address):</label>
         <input type="text" id="start" placeholder="e.g., 25.276987,55.296249 or Dubai" required>
@@ -130,7 +130,7 @@
                     const feature = route.data.features[0];
                     const distanceKm = feature.properties.segments[0].distance / 1000; // Convert meters to km
                     const durationMin = feature.properties.segments[0].duration / 60; // Convert seconds to minutes
-                    const fuelCost = (distanceKm / 6.2) * 2.7; // Fuel cost
+                    const fuelCost = (distanceKm / 6.5) * 4.28; // Fuel cost
                     const tollCost = route.hasTolls ? manualToll : 0; // Use manual toll if applicable
                     const totalCost = fuelCost + tollCost;
 
